@@ -1,0 +1,62 @@
+COPY INI KE FIREBASE CONSOLE - FIRESTORE RULES:
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    function isTeacher() {
+      return isSignedIn() && userExists() && getUserData().role == 'guru';
+    }
+    
+    function isStudent() {
+      return isSignedIn() && userExists() && getUserData().role == 'siswa';
+    }
+    
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    match /pengajuan/{pengajuanId} {
+      allow create: if isStudent();
+      allow read: if isSignedIn() && (
+        isTeacher() || 
+        (isStudent() && resource.data.nisn == getUserData().nisn)
+      );
+      allow update: if isTeacher();
+    }
+    
+    match /catatan/{catatanId} {
+      allow read: if isSignedIn() 
+        && userExists() 
+        && getUserData().role == 'guru';
+      
+      allow create: if isSignedIn() 
+        && userExists() 
+        && getUserData().role == 'guru'
+        && request.resource.data.guru_uid == request.auth.uid;
+      
+      allow update: if isSignedIn() 
+        && userExists() 
+        && getUserData().role == 'guru';
+    }
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

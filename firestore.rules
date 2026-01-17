@@ -1,0 +1,85 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function untuk cek apakah user sudah login
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function untuk mendapatkan user data (dengan error handling)
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function untuk cek apakah user data ada
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    // Helper function untuk cek apakah user adalah guru
+    function isTeacher() {
+      return isSignedIn() && userExists() && getUserData().role == 'guru';
+    }
+    
+    // Helper function untuk cek apakah user adalah siswa
+    function isStudent() {
+      return isSignedIn() && userExists() && getUserData().role == 'siswa';
+    }
+    
+    // Collection: users
+    match /users/{userId} {
+      // User yang sudah login bisa membaca semua data user (untuk query login berdasarkan email)
+      allow read: if isSignedIn();
+      
+      // User bisa update profil sendiri
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      
+      // User yang sudah login bisa create dokumen dengan UID mereka sendiri
+      // Ini penting untuk registrasi - user baru bisa create dokumen mereka sendiri
+      allow create: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Collection: pengajuan
+    match /pengajuan/{pengajuanId} {
+      // Siswa bisa membuat pengajuan baru
+      allow create: if isStudent();
+      
+      // Guru bisa membaca semua pengajuan
+      // Siswa bisa membaca pengajuan yang dibuat sendiri
+      allow read: if isSignedIn() && (
+        isTeacher() || 
+        (isStudent() && resource.data.nisn == getUserData().nisn)
+      );
+      
+      // Guru bisa update status, jadwal, tempat, dan catatan pengajuan
+      allow update: if isTeacher();
+      
+      // Siswa tidak bisa update pengajuan (hanya guru yang bisa)
+      // Tidak ada delete untuk pengajuan
+    }
+    
+    // Collection: catatan
+    match /catatan/{catatanId} {
+      // Guru bisa membaca semua catatan
+      // Siswa bisa membaca catatan yang terkait dengan pengajuan mereka sendiri
+      allow read: if isTeacher() || (
+        isStudent() && 
+        exists(/databases/$(database)/documents/pengajuan/$(catatanId)) &&
+        get(/databases/$(database)/documents/pengajuan/$(catatanId)).data.nisn == getUserData().nisn
+      );
+      
+      // Guru bisa create catatan (guru_uid harus sesuai)
+      allow create: if isTeacher() && request.resource.data.guru_uid == request.auth.uid;
+      
+      // Guru bisa update catatan (termasuk dokumen lama dengan guru_uid kosong)
+      allow update: if isTeacher();
+    }
+    
+    // Collection lain (opsional, sesuaikan dengan kebutuhan)
+    match /{document=**} {
+      allow read, write: if false; // Default: deny semua akses ke collection lain
+    }
+  }
+}
